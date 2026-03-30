@@ -35,9 +35,7 @@ export default function EditorPage() {
   const [showShare, setShowShare] = useState(false)
   const [shareLinks, setShareLinks] = useState<ShareLink[]>([])
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiResult, setAiResult] = useState<string | null>(null)
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
+const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
   const [showTreeDrawer, setShowTreeDrawer] = useState(false)
   const [showBulkCreate, setShowBulkCreate] = useState(false)
   const [bulkText, setBulkText] = useState('')
@@ -125,24 +123,6 @@ export default function EditorPage() {
     a.href = URL.createObjectURL(blob)
     a.download = `${title || '문서'}.md`
     a.click()
-  }
-
-  const handleAiCheck = async () => {
-    setAiLoading(true)
-    setAiResult(null)
-    try {
-      const res = await fetch('/api/ai-check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      })
-      const data = await res.json()
-      setAiResult(data.result)
-    } catch {
-      setAiResult('AI 검토 중 오류가 발생했습니다.')
-    } finally {
-      setAiLoading(false)
-    }
   }
 
   // ── 사이드바 액션 ──────────────────────────────
@@ -252,22 +232,11 @@ export default function EditorPage() {
             🕐
           </ToolBtn>
           <button onClick={handleExport} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors">↓ MD</button>
-          <button onClick={handleAiCheck} disabled={aiLoading} className="px-3 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors">
-            {aiLoading ? '분석 중...' : '🤖 AI 검토'}
-          </button>
           <button onClick={() => setShowShare(true)} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">발행</button>
         </div>
       </header>
 
-      {aiResult && (
-        <div className="px-4 py-3 bg-purple-50 border-b border-purple-200 text-sm text-purple-800 relative">
-          <button onClick={() => setAiResult(null)} className="absolute right-3 top-2 text-purple-400 hover:text-purple-600">×</button>
-          <strong className="text-purple-700">AI 검토 결과</strong>
-          <div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed">{aiResult}</div>
-        </div>
-      )}
-
-      <div className="flex flex-1 overflow-hidden">
+<div className="flex flex-1 overflow-hidden">
         {/* 좌: 사이드바 */}
         <aside className="w-56 bg-gray-50 border-r border-gray-200 flex flex-col shrink-0">
           <div className="flex border-b border-gray-200">
