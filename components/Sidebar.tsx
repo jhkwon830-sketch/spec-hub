@@ -15,6 +15,7 @@ function isDescendant(docs: Document[], ancestorId: string, docId: string): bool
 
 function DocNode({
   doc, docs, currentDocId, depth, dragOverDocId, draggedDocId,
+  selectedIds, onToggleSelect,
   onCreateDoc, onDeleteDoc, onMoveDoc, onDragStart, onDragOver, onDocDrop, onDragEnd,
 }: {
   doc: Document
@@ -23,6 +24,8 @@ function DocNode({
   depth: number
   dragOverDocId: string | null
   draggedDocId: string | null
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
   onCreateDoc: (parentId: string | null) => Promise<void>
   onDeleteDoc: (id: string) => Promise<void>
   onMoveDoc: (docId: string, parentId: string | null) => Promise<void>
@@ -38,6 +41,8 @@ function DocNode({
   const isCurrent = doc.id === currentDocId
   const isDropTarget = dragOverDocId === doc.id && draggedDocId !== doc.id
   const isDragging = draggedDocId === doc.id
+  const isSelected = selectedIds.has(doc.id)
+  const hasSelection = selectedIds.size > 0
 
   const canDrop = draggedDocId
     ? draggedDocId !== doc.id && !isDescendant(docs, draggedDocId, doc.id)
@@ -68,12 +73,20 @@ function DocNode({
         }}
         onDragEnd={onDragEnd}
         className={`group flex items-center gap-1 py-1 rounded cursor-pointer transition-colors
-          ${isCurrent ? 'bg-blue-100' : 'hover:bg-gray-100'}
-          ${isDropTarget && canDrop ? 'bg-blue-50 ring-1 ring-blue-400 ring-inset' : ''}
+          ${isSelected ? 'bg-blue-50' : isCurrent ? 'bg-blue-100' : 'hover:bg-gray-100'}
+          ${isDropTarget && canDrop ? 'ring-1 ring-blue-400 ring-inset' : ''}
           ${isDragging ? 'opacity-40' : ''}
         `}
         style={{ paddingLeft: `${8 + depth * 14}px`, paddingRight: '6px' }}
       >
+        {/* 체크박스 */}
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => onToggleSelect(doc.id)}
+          onClick={(e) => e.stopPropagation()}
+          className={`shrink-0 w-3 h-3 rounded accent-blue-500 transition-opacity ${hasSelection ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        />
         <button
           onClick={() => setOpen(!open)}
           className="text-gray-300 text-xs w-3 shrink-0"
@@ -128,6 +141,8 @@ function DocNode({
               depth={depth + 1}
               dragOverDocId={dragOverDocId}
               draggedDocId={draggedDocId}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
               onCreateDoc={onCreateDoc}
               onDeleteDoc={onDeleteDoc}
               onMoveDoc={onMoveDoc}
@@ -160,7 +175,28 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
   const [isFileDragging, setIsFileDragging] = useState(false)
   const [draggedDocId, setDraggedDocId] = useState<string | null>(null)
   const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleDeleteSelected = async () => {
+    if (!confirm(`선택한 ${selectedIds.size}개 문서를 삭제하시겠습니까?`)) return
+    setDeleteLoading(true)
+    for (const id of selectedIds) {
+      await onDeleteDoc(id)
+    }
+    setSelectedIds(new Set())
+    setDeleteLoading(false)
+  }
 
   const handleDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('Files')) {
@@ -204,14 +240,11 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
     setDragOverDocId(null)
   }
 
-  // 루트 드롭존 (드래그한 문서를 루트로)
   const handleRootDrop = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     e.stopPropagation()
-    if (draggedDocId) {
-      onMoveDoc(draggedDocId, null)
-    }
+    if (draggedDocId) onMoveDoc(draggedDocId, null)
     setDraggedDocId(null)
     setDragOverDocId(null)
   }
@@ -223,55 +256,19 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".md"
-        multiple
-        className="hidden"
-        onChange={handleFileChange}
-      />
+      <input ref={fileInputRef} type="file" accept=".md" multiple className="hidden" onChange={handleFileChange} />
 
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">문서</span>
         <div className="flex items-center gap-1">
-          <button
-            onClick={onBulkCreate}
-            title="일괄 생성"
-            className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-200 transition-colors"
-          >
-            일괄
-          </button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="md 파일 업로드"
-            className="text-gray-400 hover:text-gray-600 text-sm px-1"
-          >
-            ↑
-          </button>
-          <button
-            onClick={() => onCreateDoc(null)}
-            title="새 문서"
-            className="text-gray-400 hover:text-gray-600 text-sm px-1"
-          >
-            +
-          </button>
+          <button onClick={onBulkCreate} title="일괄 생성" className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-200 transition-colors">일괄</button>
+          <button onClick={() => fileInputRef.current?.click()} title="md 파일 업로드" className="text-gray-400 hover:text-gray-600 text-sm px-1">↑</button>
+          <button onClick={() => onCreateDoc(null)} title="새 문서" className="text-gray-400 hover:text-gray-600 text-sm px-1">+</button>
           <div className="relative">
-            <button
-              onClick={() => setShowMore(!showMore)}
-              className="text-gray-400 hover:text-gray-600 text-sm px-1"
-              title="더보기"
-            >
-              ⋯
-            </button>
+            <button onClick={() => setShowMore(!showMore)} className="text-gray-400 hover:text-gray-600 text-sm px-1" title="더보기">⋯</button>
             {showMore && (
               <div className="absolute right-0 top-5 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-28">
-                <button
-                  onClick={() => { onDeleteAll(); setShowMore(false) }}
-                  className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-500"
-                >
-                  전체 삭제
-                </button>
+                <button onClick={() => { onDeleteAll(); setShowMore(false) }} className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-500">전체 삭제</button>
               </div>
             )}
           </div>
@@ -298,6 +295,8 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
                   depth={0}
                   dragOverDocId={dragOverDocId}
                   draggedDocId={draggedDocId}
+                  selectedIds={selectedIds}
+                  onToggleSelect={handleToggleSelect}
                   onCreateDoc={onCreateDoc}
                   onDeleteDoc={onDeleteDoc}
                   onMoveDoc={onMoveDoc}
@@ -308,7 +307,6 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
                 />
               ))}
             </ul>
-            {/* 루트 드롭존 */}
             {draggedDocId && (
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOverDocId(null) }}
@@ -321,6 +319,23 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
           </>
         )}
       </div>
+
+      {/* 다중 선택 삭제 바 */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between px-3 py-2 border-t border-gray-200 bg-white shrink-0">
+          <span className="text-xs text-gray-500">{selectedIds.size}개 선택됨</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSelectedIds(new Set())} className="text-xs text-gray-400 hover:text-gray-600">취소</button>
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleteLoading}
+              className="text-xs px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded disabled:opacity-50"
+            >
+              {deleteLoading ? '삭제 중...' : '삭제'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
