@@ -44,12 +44,12 @@ export default function ShareModal({ docId, existingLinks, onCreateLink, onClose
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-800">공유 링크 생성</h2>
+          <h2 className="text-base font-semibold text-gray-800">발행</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
 
         <div className="p-5 space-y-3">
-          <p className="text-xs text-gray-400">권한을 선택해 공유 링크를 만드세요</p>
+          <p className="text-xs text-gray-400">권한을 선택해 발행 링크를 만드세요</p>
 
           {(['view', 'comment', 'suggest'] as const).map((p) => (
             <button
@@ -64,7 +64,7 @@ export default function ShareModal({ docId, existingLinks, onCreateLink, onClose
 
           {created && (
             <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg space-y-2">
-              <p className="text-xs text-green-700 font-medium">링크 생성됨 ({created.permission})</p>
+              <p className="text-xs text-green-700 font-medium">발행됨 ({created.permission})</p>
               <div className="flex gap-2">
                 <input
                   readOnly

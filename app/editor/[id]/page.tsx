@@ -173,6 +173,29 @@ export default function EditorPage() {
     router.push('/')
   }
 
+  const handleUpload = async (files: FileList) => {
+    const mdFiles = Array.from(files).filter((f) => f.name.endsWith('.md'))
+    if (mdFiles.length === 0) {
+      alert('md 파일만 올릴 수 있어요')
+      return
+    }
+
+    let lastDocId: string | null = null
+    for (const file of mdFiles) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`${file.name}: 파일이 너무 커요 (5MB 초과)`)
+        continue
+      }
+      const content = await file.text()
+      const title = file.name.replace(/\.md$/, '')
+      const d = await store.createDoc(title, content, null, workspaceId.current)
+      lastDocId = d.id
+    }
+
+    await refreshWorkspace()
+    if (lastDocId) router.push(`/editor/${lastDocId}`)
+  }
+
   const handleBulkCreate = async () => {
     if (!bulkText.trim()) return
     setBulkLoading(true)
@@ -232,7 +255,7 @@ export default function EditorPage() {
           <button onClick={handleAiCheck} disabled={aiLoading} className="px-3 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50 transition-colors">
             {aiLoading ? '분석 중...' : '🤖 AI 검토'}
           </button>
-          <button onClick={() => setShowShare(true)} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">공유</button>
+          <button onClick={() => setShowShare(true)} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">발행</button>
         </div>
       </header>
 
@@ -272,6 +295,7 @@ export default function EditorPage() {
                     onMoveDoc={handleMoveDoc}
                     onBulkCreate={() => setShowBulkCreate(true)}
                     onDeleteAll={handleDeleteAll}
+                    onUpload={handleUpload}
                   />
                 </div>
               </>

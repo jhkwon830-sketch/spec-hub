@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Document } from '@/lib/store'
 
@@ -106,14 +106,56 @@ interface Props {
   onMoveDoc: (docId: string, parentId: string | null) => Promise<void>
   onBulkCreate: () => void
   onDeleteAll: () => Promise<void>
+  onUpload: (files: FileList) => Promise<void>
 }
 
-export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, onMoveDoc, onBulkCreate, onDeleteAll }: Props) {
+export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, onMoveDoc, onBulkCreate, onDeleteAll, onUpload }: Props) {
   const rootDocs = docs.filter((d) => d.parent_id === null)
   const [showMore, setShowMore] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false)
+    }
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const files = e.dataTransfer.files
+    if (files.length > 0) await onUpload(files)
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      await onUpload(e.target.files)
+      e.target.value = ''
+    }
+  }
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className={`flex flex-col h-full transition-colors ${isDragging ? 'bg-blue-50 ring-2 ring-blue-400 ring-inset' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".md"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">문서</span>
         <div className="flex items-center gap-1">
@@ -123,6 +165,13 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
             className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-0.5 rounded hover:bg-gray-200 transition-colors"
           >
             일괄
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            title="md 파일 업로드"
+            className="text-gray-400 hover:text-gray-600 text-sm px-1"
+          >
+            ↑
           </button>
           <button
             onClick={() => onCreateDoc(null)}
@@ -154,7 +203,12 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
       </div>
 
       <div className="flex-1 overflow-auto py-1">
-        {docs.length === 0 ? (
+        {isDragging ? (
+          <div className="flex flex-col items-center justify-center h-full text-blue-400 text-xs gap-1">
+            <span className="text-2xl">↑</span>
+            <span>여기에 .md 파일을 놓으세요</span>
+          </div>
+        ) : docs.length === 0 ? (
           <p className="text-xs text-gray-400 text-center mt-4">문서가 없습니다</p>
         ) : (
           <ul className="space-y-0.5">
