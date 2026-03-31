@@ -13,25 +13,31 @@ function isDescendant(docs: Document[], ancestorId: string, docId: string): bool
   return false
 }
 
+type DropZone = 'before' | 'into' | 'after'
+
 function DocNode({
-  doc, docs, currentDocId, depth, dragOverDocId, draggedDocId,
+  doc, docs, currentDocId, depth,
+  dropTarget, draggedDocId,
   selectedIds, onToggleSelect,
-  onCreateDoc, onDeleteDoc, onMoveDoc, onDragStart, onDragOver, onDocDrop, onDragEnd,
+  onCreateDoc, onDeleteDoc, onMoveDoc, onShareDoc, onToggleExclude,
+  onDragStart, onDragOver, onDocDrop, onDragEnd,
 }: {
   doc: Document
   docs: Document[]
   currentDocId?: string
   depth: number
-  dragOverDocId: string | null
+  dropTarget: { docId: string; zone: DropZone } | null
   draggedDocId: string | null
   selectedIds: Set<string>
   onToggleSelect: (id: string) => void
   onCreateDoc: (parentId: string | null) => Promise<void>
   onDeleteDoc: (id: string) => Promise<void>
   onMoveDoc: (docId: string, parentId: string | null) => Promise<void>
+  onShareDoc: (docId: string) => void
+  onToggleExclude: (docId: string, exclude: boolean) => Promise<void>
   onDragStart: (docId: string) => void
-  onDragOver: (docId: string) => void
-  onDocDrop: (targetDocId: string) => void
+  onDragOver: (docId: string, zone: DropZone) => void
+  onDocDrop: (targetDocId: string, zone: DropZone) => void
   onDragEnd: () => void
 }) {
   const router = useRouter()
@@ -39,7 +45,6 @@ function DocNode({
   const [showMenu, setShowMenu] = useState(false)
   const children = docs.filter((d) => d.parent_id === doc.id)
   const isCurrent = doc.id === currentDocId
-  const isDropTarget = dragOverDocId === doc.id && draggedDocId !== doc.id
   const isDragging = draggedDocId === doc.id
   const isSelected = selectedIds.has(doc.id)
   const hasSelection = selectedIds.size > 0
@@ -48,8 +53,35 @@ function DocNode({
     ? draggedDocId !== doc.id && !isDescendant(docs, draggedDocId, doc.id)
     : false
 
+  const isDropTarget = dropTarget?.docId === doc.id && canDrop
+  const zone = isDropTarget ? dropTarget!.zone : null
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer.types.includes('Files') || !canDrop) return
+    e.preventDefault()
+    e.stopPropagation()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const y = e.clientY - rect.top
+    const ratio = y / rect.height
+    const z: DropZone = ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'into'
+    onDragOver(doc.id, z)
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!e.dataTransfer.types.includes('Files') && canDrop && dropTarget?.docId === doc.id) {
+      onDocDrop(doc.id, dropTarget!.zone)
+    }
+  }
+
   return (
     <li>
+      {/* before 인디케이터 */}
+      {zone === 'before' && (
+        <div className="mx-2 h-0.5 bg-blue-400 rounded" style={{ marginLeft: `${8 + depth * 14}px` }} />
+      )}
+
       <div
         draggable
         onDragStart={(e) => {
@@ -57,24 +89,12 @@ function DocNode({
           e.dataTransfer.effectAllowed = 'move'
           onDragStart(doc.id)
         }}
-        onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes('Files') && canDrop) {
-            e.preventDefault()
-            e.stopPropagation()
-            onDragOver(doc.id)
-          }
-        }}
-        onDrop={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          if (!e.dataTransfer.types.includes('Files') && canDrop) {
-            onDocDrop(doc.id)
-          }
-        }}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         onDragEnd={onDragEnd}
         className={`group flex items-center gap-1 py-1 rounded cursor-pointer transition-colors
           ${isSelected ? 'bg-blue-50' : isCurrent ? 'bg-blue-100' : 'hover:bg-gray-100'}
-          ${isDropTarget && canDrop ? 'ring-1 ring-blue-400 ring-inset' : ''}
+          ${zone === 'into' ? 'ring-1 ring-blue-400 ring-inset' : ''}
           ${isDragging ? 'opacity-40' : ''}
         `}
         style={{ paddingLeft: `${8 + depth * 14}px`, paddingRight: '6px' }}
@@ -111,11 +131,30 @@ function DocNode({
               </button>
               <div className="border-t border-gray-100">
                 <button
+                  onClick={() => { onShareDoc(doc.id); setShowMenu(false) }}
+                  className="block w-full text-left px-3 py-1.5 hover:bg-gray-50"
+                >
+                  링크 발행
+                </button>
+              </div>
+              <div className="border-t border-gray-100">
+                <button
                   onClick={() => { onMoveDoc(doc.id, null); setShowMenu(false) }}
                   className="block w-full text-left px-3 py-1.5 hover:bg-gray-50"
                 >
                   루트로 이동
                 </button>
+              </div>
+              <div className="border-t border-gray-100">
+                <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!doc.exclude_from_tree}
+                    onChange={() => { onToggleExclude(doc.id, !doc.exclude_from_tree); setShowMenu(false) }}
+                    className="w-3 h-3 accent-blue-500"
+                  />
+                  <span className="text-gray-600">구조도 포함</span>
+                </label>
               </div>
               <div className="border-t border-gray-100">
                 <button
@@ -130,6 +169,11 @@ function DocNode({
         </div>
       </div>
 
+      {/* after 인디케이터 */}
+      {zone === 'after' && (
+        <div className="h-0.5 bg-blue-400 rounded" style={{ marginLeft: `${8 + depth * 14}px`, marginRight: '6px' }} />
+      )}
+
       {open && children.length > 0 && (
         <ul>
           {children.map((child) => (
@@ -139,13 +183,15 @@ function DocNode({
               docs={docs}
               currentDocId={currentDocId}
               depth={depth + 1}
-              dragOverDocId={dragOverDocId}
+              dropTarget={dropTarget}
               draggedDocId={draggedDocId}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
               onCreateDoc={onCreateDoc}
               onDeleteDoc={onDeleteDoc}
               onMoveDoc={onMoveDoc}
+              onShareDoc={onShareDoc}
+              onToggleExclude={onToggleExclude}
               onDragStart={onDragStart}
               onDragOver={onDragOver}
               onDocDrop={onDocDrop}
@@ -164,17 +210,20 @@ interface Props {
   onCreateDoc: (parentId: string | null) => Promise<void>
   onDeleteDoc: (id: string) => Promise<void>
   onMoveDoc: (docId: string, parentId: string | null) => Promise<void>
+  onReorder: (updates: { id: string; sort_order: number }[]) => Promise<void>
+  onShareDoc: (docId: string) => void
+  onToggleExclude: (docId: string, exclude: boolean) => Promise<void>
   onBulkCreate: () => void
   onDeleteAll: () => Promise<void>
   onUpload: (files: FileList) => Promise<void>
 }
 
-export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, onMoveDoc, onBulkCreate, onDeleteAll, onUpload }: Props) {
+export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, onMoveDoc, onReorder, onShareDoc, onToggleExclude, onBulkCreate, onDeleteAll, onUpload }: Props) {
   const rootDocs = docs.filter((d) => d.parent_id === null)
   const [showMore, setShowMore] = useState(false)
   const [isFileDragging, setIsFileDragging] = useState(false)
   const [draggedDocId, setDraggedDocId] = useState<string | null>(null)
-  const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ docId: string; zone: DropZone } | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [deleteLoading, setDeleteLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -198,7 +247,7 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
     setDeleteLoading(false)
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleFileDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('Files')) {
       e.preventDefault()
       setIsFileDragging(true)
@@ -211,7 +260,7 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
     }
   }
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleFileDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setIsFileDragging(false)
     if (e.dataTransfer.types.includes('Files')) {
@@ -227,34 +276,70 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
     }
   }
 
-  const handleDocDrop = (targetDocId: string) => {
-    if (draggedDocId && draggedDocId !== targetDocId) {
-      onMoveDoc(draggedDocId, targetDocId)
+  const handleDocDrop = (targetDocId: string, zone: DropZone) => {
+    if (!draggedDocId || draggedDocId === targetDocId) {
+      setDraggedDocId(null)
+      setDropTarget(null)
+      return
     }
+
+    const dragged = docs.find((d) => d.id === draggedDocId)!
+    const target = docs.find((d) => d.id === targetDocId)!
+
+    if (zone === 'into') {
+      // 하위 자식으로 이동
+      onMoveDoc(draggedDocId, targetDocId)
+    } else {
+      // 형제 순서 이동 (before/after)
+      // target의 부모 아래 형제들 가져오기
+      const siblings = docs.filter((d) => d.parent_id === target.parent_id)
+      const withoutDragged = siblings.filter((d) => d.id !== draggedDocId)
+      const targetIdx = withoutDragged.findIndex((d) => d.id === targetDocId)
+      const insertIdx = zone === 'after' ? targetIdx + 1 : targetIdx
+      withoutDragged.splice(insertIdx, 0, dragged)
+
+      if (dragged.parent_id !== target.parent_id) {
+        // 다른 부모면 계층 이동 후 순서 적용
+        onMoveDoc(draggedDocId, target.parent_id).then(() => {
+          onReorder(withoutDragged.map((d, i) => ({ id: d.id, sort_order: i })))
+        })
+      } else {
+        onReorder(withoutDragged.map((d, i) => ({ id: d.id, sort_order: i })))
+      }
+    }
+
     setDraggedDocId(null)
-    setDragOverDocId(null)
+    setDropTarget(null)
   }
 
   const handleDragEnd = () => {
     setDraggedDocId(null)
-    setDragOverDocId(null)
+    setDropTarget(null)
   }
 
   const handleRootDrop = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     e.stopPropagation()
-    if (draggedDocId) onMoveDoc(draggedDocId, null)
+    if (draggedDocId) {
+      const dragged = docs.find((d) => d.id === draggedDocId)
+      if (dragged && dragged.parent_id === null) {
+        const roots = docs.filter((d) => d.parent_id === null && d.id !== draggedDocId)
+        onReorder([...roots, dragged].map((d, i) => ({ id: d.id, sort_order: i })))
+      } else {
+        onMoveDoc(draggedDocId, null)
+      }
+    }
     setDraggedDocId(null)
-    setDragOverDocId(null)
+    setDropTarget(null)
   }
 
   return (
     <div
       className={`flex flex-col h-full transition-colors ${isFileDragging ? 'bg-blue-50 ring-2 ring-blue-400 ring-inset' : ''}`}
-      onDragOver={handleDragOver}
+      onDragOver={handleFileDragOver}
       onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      onDrop={handleFileDrop}
     >
       <input ref={fileInputRef} type="file" accept=".md" multiple className="hidden" onChange={handleFileChange} />
 
@@ -267,7 +352,7 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
           <div className="relative">
             <button onClick={() => setShowMore(!showMore)} className="text-gray-400 hover:text-gray-600 text-sm px-1" title="더보기">⋯</button>
             {showMore && (
-              <div className="absolute right-0 top-5 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-28">
+              <div className="absolute right-0 top-5 z-50 bg-white border border-gray-200 rounded shadow-lg text-xs w-32">
                 <button onClick={() => { onDeleteAll(); setShowMore(false) }} className="block w-full text-left px-3 py-1.5 hover:bg-gray-50 text-red-500">전체 삭제</button>
               </div>
             )}
@@ -293,15 +378,17 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
                   docs={docs}
                   currentDocId={currentDocId}
                   depth={0}
-                  dragOverDocId={dragOverDocId}
+                  dropTarget={dropTarget}
                   draggedDocId={draggedDocId}
                   selectedIds={selectedIds}
                   onToggleSelect={handleToggleSelect}
                   onCreateDoc={onCreateDoc}
                   onDeleteDoc={onDeleteDoc}
                   onMoveDoc={onMoveDoc}
+                  onShareDoc={onShareDoc}
+                  onToggleExclude={onToggleExclude}
                   onDragStart={(id) => setDraggedDocId(id)}
-                  onDragOver={(id) => setDragOverDocId(id)}
+                  onDragOver={(id, zone) => setDropTarget({ docId: id, zone })}
                   onDocDrop={handleDocDrop}
                   onDragEnd={handleDragEnd}
                 />
@@ -309,7 +396,7 @@ export default function Sidebar({ docs, currentDocId, onCreateDoc, onDeleteDoc, 
             </ul>
             {draggedDocId && (
               <div
-                onDragOver={(e) => { e.preventDefault(); setDragOverDocId(null) }}
+                onDragOver={(e) => { e.preventDefault(); setDropTarget(null) }}
                 onDrop={handleRootDrop}
                 className="mx-2 mt-1 h-8 rounded border border-dashed border-gray-300 flex items-center justify-center text-xs text-gray-400"
               >

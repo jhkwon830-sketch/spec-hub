@@ -17,7 +17,6 @@ export default function ShareModal({ docId, existingLinks, onCreateLink, onClose
   const permissionLabels = {
     view: '읽기 전용 — 내용만 볼 수 있음',
     comment: '코멘트 — 읽기 + 코멘트 가능',
-    suggest: '제안 — 읽기 + 코멘트 + 수정 제안 가능',
   }
 
   const handleCreate = async (permission: ShareLink['permission']) => {
@@ -51,7 +50,7 @@ export default function ShareModal({ docId, existingLinks, onCreateLink, onClose
         <div className="p-5 space-y-3">
           <p className="text-xs text-gray-400">권한을 선택해 발행 링크를 만드세요</p>
 
-          {(['view', 'comment', 'suggest'] as const).map((p) => (
+          {(['view', 'comment'] as const).map((p) => (
             <button
               key={p}
               onClick={() => handleCreate(p)}

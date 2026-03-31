@@ -31,16 +31,26 @@ export interface Document {
   content: string
   parent_id: string | null
   workspace_id: string | null
+  exclude_from_tree: boolean
   created_at: string
   updated_at: string
   comments: Comment[]
   versions: Version[]
 }
 
+export interface Publication {
+  id: string
+  workspace_id: string
+  published_at: string
+}
+
 export interface ShareLink {
   token: string
-  doc_id: string
-  permission: 'view' | 'comment' | 'suggest'
+  doc_id: string | null
+  workspace_id: string | null
+  publication_id: string | null
+  permission: 'view' | 'comment'
+  slug: string | null
   created_at: string
 }
 
@@ -159,8 +169,21 @@ export const store = {
       .from('documents')
       .select('*')
       .eq('workspace_id', workspaceId)
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
     return (data ?? []).map((d) => ({ ...d, comments: [], versions: [] }))
+  },
+
+  async toggleExcludeFromTree(id: string, exclude: boolean): Promise<void> {
+    await supabase.from('documents').update({ exclude_from_tree: exclude }).eq('id', id)
+  },
+
+  async reorderDocs(updates: { id: string; sort_order: number }[]) {
+    await Promise.all(
+      updates.map(({ id, sort_order }) =>
+        supabase.from('documents').update({ sort_order }).eq('id', id)
+      )
+    )
   },
 
   // ── 버전 ──────────────────────────────────────
@@ -190,8 +213,13 @@ export const store = {
   },
 
   // ── 공유 ──────────────────────────────────────
-  async createShareLink(docId: string, permission: ShareLink['permission']): Promise<ShareLink> {
-    const { data } = await supabase.from('share_links').insert({ doc_id: docId, permission }).select().single()
+  async createDocShareLink(docId: string, permission: ShareLink['permission']): Promise<ShareLink> {
+    const { data } = await supabase.from('share_links').insert({ doc_id: docId, workspace_id: null, permission }).select().single()
+    return data
+  },
+
+  async createWorkspaceShareLink(workspaceId: string, permission: ShareLink['permission']): Promise<ShareLink> {
+    const { data } = await supabase.from('share_links').insert({ workspace_id: workspaceId, doc_id: null, permission }).select().single()
     return data
   },
 
@@ -202,6 +230,11 @@ export const store = {
 
   async getDocShareLinks(docId: string): Promise<ShareLink[]> {
     const { data } = await supabase.from('share_links').select('*').eq('doc_id', docId)
+    return data ?? []
+  },
+
+  async getWorkspaceShareLinks(workspaceId: string): Promise<ShareLink[]> {
+    const { data } = await supabase.from('share_links').select('*').eq('workspace_id', workspaceId)
     return data ?? []
   },
 }

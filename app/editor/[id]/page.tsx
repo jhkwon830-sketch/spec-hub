@@ -10,6 +10,7 @@ import StructureTree from '@/components/StructureTree'
 import CommentPanel from '@/components/CommentPanel'
 import VersionPanel from '@/components/VersionPanel'
 import ShareModal from '@/components/ShareModal'
+import WorkspaceShareModal from '@/components/WorkspaceShareModal'
 import Sidebar from '@/components/Sidebar'
 
 const Placeholder = () => <div className="h-full w-full bg-white" />
@@ -32,14 +33,21 @@ export default function EditorPage() {
   const [title, setTitle] = useState('')
   const [rightPanel, setRightPanel] = useState<RightPanel>(null)
   const [activeTab, setActiveTab] = useState<Tab>('preview')
-  const [showShare, setShowShare] = useState(false)
-  const [shareLinks, setShareLinks] = useState<ShareLink[]>([])
+  const [showWorkspaceShare, setShowWorkspaceShare] = useState(false)
+  const [workspaceShareLinks, setWorkspaceShareLinks] = useState<ShareLink[]>([])
+  const [showDocShare, setShowDocShare] = useState(false)
+  const [docShareLinks, setDocShareLinks] = useState<ShareLink[]>([])
+  const [sharingDocId, setSharingDocId] = useState<string | null>(null)
+  const [latestPublicationId, setLatestPublicationId] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
   const [showTreeDrawer, setShowTreeDrawer] = useState(false)
   const [showBulkCreate, setShowBulkCreate] = useState(false)
   const [bulkText, setBulkText] = useState('')
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [workspaceName, setWorkspaceName] = useState('')
+  const [treeFullView, setTreeFullView] = useState(false)
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const workspaceId = useRef<string | null>(null)
@@ -59,12 +67,21 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
       setDoc(d)
       setContent(d.content)
       setTitle(d.title)
+      const prevWsId = workspaceId.current
       workspaceId.current = d.workspace_id
       if (d.workspace_id) {
+        // 같은 워크스페이스면 allDocs 유지한 채 백그라운드 갱신 (LNB 깜빡임 방지)
+        if (prevWsId !== d.workspace_id) {
+          setAllDocs([])
+          store.listWorkspaces().then((ws) => {
+            const w = ws.find((w) => w.id === d.workspace_id)
+            if (w) setWorkspaceName(w.name)
+          })
+          store.getWorkspaceShareLinks(d.workspace_id).then(setWorkspaceShareLinks)
+        }
         store.getDocTree(d.workspace_id).then(setAllDocs)
       }
     })
-    store.getDocShareLinks(id).then(setShareLinks)
   }, [id, router])
 
   const handleContentChange = useCallback((val: string) => {
@@ -111,9 +128,51 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
     if (updated) { setDoc(updated); setContent(updated.content) }
   }
 
+  const handlePublish = async () => {
+    const wsId = workspaceId.current
+    if (!wsId) return
+    setPublishing(true)
+    const res = await fetch('/api/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId: wsId }),
+    })
+    const data = await res.json()
+    if (data.publication) setLatestPublicationId(data.publication.id)
+    if (data.links) setWorkspaceShareLinks(data.links)
+    setPublishing(false)
+    alert('발행 완료!')
+  }
+
+  const handleRegenerate = async (token: string) => {
+    const res = await fetch('/api/share/workspace/regenerate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    setWorkspaceShareLinks((prev) => prev.map((l) => l.token === token ? data.link : l))
+  }
+
+  const handleShareDoc = async (docId: string) => {
+    setSharingDocId(docId)
+    const links = await store.getDocShareLinks(docId)
+    setDocShareLinks(links)
+    setShowDocShare(true)
+  }
+
+  const handleCreateDocShareLink = async (permission: ShareLink['permission']) => {
+    if (!sharingDocId) return { token: '', doc_id: null, workspace_id: null, permission, created_at: '' } as ShareLink
+    const link = await store.createDocShareLink(sharingDocId, permission)
+    setDocShareLinks((prev) => [...prev, link])
+    return link
+  }
+
+  // 기존 handleCreateShareLink (이름 유지 혹시 다른 곳에서 쓰일 경우 대비)
   const handleCreateShareLink = async (permission: ShareLink['permission']) => {
-    const link = await store.createShareLink(id, permission)
-    setShareLinks((prev) => [...prev, link])
+    const link = await store.createDocShareLink(id, permission)
+    setDocShareLinks((prev) => [...prev, link])
     return link
   }
 
@@ -122,6 +181,19 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = `${title || '문서'}.md`
+    a.click()
+  }
+
+  const handleExportAll = async () => {
+    const { default: JSZip } = await import('jszip')
+    const zip = new JSZip()
+    for (const doc of allDocs) {
+      zip.file(`${doc.title || 'untitled'}.md`, doc.content || '')
+    }
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${workspaceName || 'workspace'}.zip`
     a.click()
   }
 
@@ -135,12 +207,22 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
   const handleDeleteDoc = async (docId: string) => {
     if (!confirm('삭제하시겠습니까?')) return
     await store.deleteDoc(docId)
-    await refreshWorkspace()
-    if (docId === id) router.push('/')
+    const remaining = await store.getDocTree(workspaceId.current!)
+    setAllDocs(remaining)
+    if (remaining.length === 0) {
+      router.push(`/workspace/${workspaceId.current}`)
+    } else if (docId === id) {
+      router.push(`/editor/${remaining[0].id}`)
+    }
   }
 
   const handleMoveDoc = async (docId: string, parentId: string | null) => {
     await store.updateDoc(docId, { parent_id: parentId })
+    await refreshWorkspace()
+  }
+
+  const handleToggleExclude = async (docId: string, exclude: boolean) => {
+    await store.toggleExcludeFromTree(docId, exclude)
     await refreshWorkspace()
   }
 
@@ -149,8 +231,8 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
     for (const doc of allDocs) {
       await store.deleteDoc(doc.id)
     }
-    await refreshWorkspace()
-    router.push('/')
+    setAllDocs([])
+    router.push(`/workspace/${workspaceId.current}`)
   }
 
   const handleUpload = async (files: FileList) => {
@@ -212,6 +294,12 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
       {/* 상단 바 */}
       <header className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-200 bg-white shrink-0">
         <button onClick={() => router.push('/')} className="text-gray-400 hover:text-gray-600 text-sm shrink-0">←</button>
+        {workspaceName && (
+          <>
+            <span className="text-sm font-medium text-gray-700 shrink-0">{workspaceName}</span>
+            <span className="text-gray-300 shrink-0">/</span>
+          </>
+        )}
         <input
           value={title}
           onChange={(e) => handleTitleChange(e.target.value)}
@@ -221,18 +309,21 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowTreeDrawer(!showTreeDrawer)}
-            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${showTreeDrawer ? 'bg-gray-800 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
+            disabled={allDocs.length === 0}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${showTreeDrawer ? 'bg-gray-800 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
           >
             구조도 보기
           </button>
-          <ToolBtn active={rightPanel === 'comments'} onClick={() => setRightPanel(rightPanel === 'comments' ? null : 'comments')} title="코멘트">
+          <ToolBtn active={rightPanel === 'comments'} onClick={() => setRightPanel(rightPanel === 'comments' ? null : 'comments')} title="코멘트" disabled={allDocs.length === 0}>
             💬{unresolvedCount > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1 rounded-full">{unresolvedCount}</span>}
           </ToolBtn>
-          <ToolBtn active={rightPanel === 'versions'} onClick={() => setRightPanel(rightPanel === 'versions' ? null : 'versions')} title="버전 이력">
+          <ToolBtn active={rightPanel === 'versions'} onClick={() => setRightPanel(rightPanel === 'versions' ? null : 'versions')} title="버전 이력" disabled={allDocs.length === 0}>
             🕐
           </ToolBtn>
-          <button onClick={handleExport} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors">↓ MD</button>
-          <button onClick={() => setShowShare(true)} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">발행</button>
+          <button onClick={handleExport} disabled={allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">↓ MD</button>
+          <button onClick={handleExportAll} disabled={allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">↓ 전체</button>
+          <button onClick={handlePublish} disabled={publishing || allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-900 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">{publishing ? '발행 중...' : '발행'}</button>
+          <button onClick={() => setShowWorkspaceShare(true)} disabled={allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">공유</button>
         </div>
       </header>
 
@@ -262,9 +353,12 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
                     onCreateDoc={handleCreateDoc}
                     onDeleteDoc={handleDeleteDoc}
                     onMoveDoc={handleMoveDoc}
+                    onReorder={async (updates) => { await store.reorderDocs(updates); await refreshWorkspace() }}
                     onBulkCreate={() => setShowBulkCreate(true)}
                     onDeleteAll={handleDeleteAll}
                     onUpload={handleUpload}
+                    onShareDoc={handleShareDoc}
+                    onToggleExclude={handleToggleExclude}
                   />
                 </div>
               </>
@@ -284,17 +378,29 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
         {/* 미리보기 */}
         <div className="flex-1 overflow-hidden flex flex-col bg-white">
           <div className="flex border-b border-gray-200 shrink-0">
-            {(['preview', 'tree', 'flow'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setActiveTab(t)}
-                className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-                  activeTab === t ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                {t === 'preview' ? '미리보기' : t === 'tree' ? '섹션 트리' : '유저플로우'}
-              </button>
-            ))}
+            {(['preview', 'tree', 'flow'] as const).map((t) => {
+              const mermaidCount = (content.match(/```mermaid/g) || []).length
+              return (
+                <button
+                  key={t}
+                  onClick={() => setActiveTab(t)}
+                  className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
+                    activeTab === t ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'
+                  }`}
+                >
+                  {t === 'preview' ? '미리보기' : t === 'tree' ? '섹션 트리' : (
+                    <span className="flex items-center gap-1">
+                      다이어그램
+                      {mermaidCount > 0 && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${activeTab === 'flow' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                          {mermaidCount}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
           <div className="flex-1 overflow-hidden">
             {activeTab === 'preview' ? (
@@ -318,9 +424,17 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
         )}
       </div>
 
-      {showShare && (
-        <ShareModal docId={id} existingLinks={shareLinks}
-          onCreateLink={handleCreateShareLink} onClose={() => setShowShare(false)} />
+      {showWorkspaceShare && (
+        <WorkspaceShareModal
+          links={workspaceShareLinks}
+          onClose={() => setShowWorkspaceShare(false)}
+          onRegenerate={handleRegenerate}
+        />
+      )}
+
+      {showDocShare && sharingDocId && (
+        <ShareModal docId={sharingDocId} existingLinks={docShareLinks}
+          onCreateLink={handleCreateDocShareLink} onClose={() => { setShowDocShare(false); setSharingDocId(null) }} />
       )}
 
       {/* 전체 트리 드로어 */}
@@ -330,13 +444,22 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
             className="fixed inset-0 z-40 bg-black/20"
             onClick={() => setShowTreeDrawer(false)}
           />
-          <div className="fixed top-0 right-0 z-50 h-full w-[50vw] bg-white border-l border-gray-200 flex flex-col shadow-2xl">
+          <div className={`fixed top-0 right-0 z-50 h-full bg-white border-l border-gray-200 flex flex-col shadow-2xl transition-all duration-200 ${treeFullView ? 'w-full border-l-0' : 'w-[50vw]'}`}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-              <span className="text-sm font-semibold text-gray-700">구조도 보기</span>
-              <button onClick={() => setShowTreeDrawer(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+              <span className="text-sm font-semibold text-gray-700">{workspaceName || '구조도 보기'}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTreeFullView((v) => !v)}
+                  className="text-gray-400 hover:text-gray-600 text-sm px-2 py-0.5 rounded hover:bg-gray-100"
+                  title={treeFullView ? '절반 보기' : '전체 화면'}
+                >
+                  {treeFullView ? '⊠' : '⊞'}
+                </button>
+                <button onClick={() => { setShowTreeDrawer(false); setTreeFullView(false) }} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+              </div>
             </div>
             <div className="flex-1 overflow-hidden">
-              <WorkspaceTreeFlow docs={allDocs} currentDocId={id} />
+              <WorkspaceTreeFlow docs={allDocs} currentDocId={id} workspaceName={workspaceName} />
             </div>
           </div>
         </>
@@ -378,12 +501,12 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
   )
 }
 
-function ToolBtn({ active, onClick, title, children }: {
-  active: boolean; onClick: () => void; title: string; children: React.ReactNode
+function ToolBtn({ active, onClick, title, children, disabled }: {
+  active: boolean; onClick: () => void; title: string; children: React.ReactNode; disabled?: boolean
 }) {
   return (
-    <button onClick={onClick} title={title}
-      className={`px-2.5 py-1 rounded text-sm transition-colors ${
+    <button onClick={onClick} title={title} disabled={disabled}
+      className={`px-2.5 py-1 rounded text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
         active ? 'bg-gray-200 text-gray-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
       }`}
     >
@@ -407,9 +530,32 @@ function FlowView({ content }: { content: string }) {
       </div>
     )
   }
-  const mermaidBlocks = content.match(/```mermaid\n([\s\S]*?)```/g) || []
-  const mermaidOnly = mermaidBlocks.join('\n\n')
+  // 각 mermaid 블록 앞 헤딩 추출
+  const lines = content.split('\n')
+  const diagrams: { title: string; code: string }[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('```mermaid')) {
+      const titleLine = lines[i - 1] ?? ''
+      const title = titleLine.match(/^#{1,6} (.+)$/) ? titleLine.replace(/^#{1,6} /, '') : ''
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      diagrams.push({ title, code: '```mermaid\n' + codeLines.join('\n') + '\n```' })
+    }
+  }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { default: MarkdownPreview } = require('@/components/MarkdownPreview')
-  return <MarkdownPreview content={mermaidOnly} permission="view" />
+  return (
+    <div className="h-full overflow-auto p-4 space-y-6">
+      {diagrams.map((d, i) => (
+        <div key={i}>
+          {d.title && <p className="text-xs font-semibold text-gray-500 mb-2">{d.title}</p>}
+          <MarkdownPreview content={d.code} permission="view" />
+        </div>
+      ))}
+    </div>
+  )
 }

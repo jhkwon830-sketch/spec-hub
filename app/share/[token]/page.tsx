@@ -20,13 +20,13 @@ export default function SharePage() {
   const [notFound, setNotFound] = useState(false)
 
   useEffect(() => {
-    store.getShareLink(token).then(async (shareLink) => {
-      if (!shareLink) { setNotFound(true); return }
-      const d = await store.getDoc(shareLink.doc_id)
-      if (!d) { setNotFound(true); return }
-      setLink(shareLink)
-      setDoc(d)
-    })
+    fetch(`/api/share/${token}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!data) { setNotFound(true); return }
+        setLink(data.link)
+        setDoc(data.doc)
+      })
   }, [token])
 
   const handleAddComment = (sectionId: string) => {
@@ -35,13 +35,13 @@ export default function SharePage() {
   }
 
   const handleSubmitComment = async (sectionId: string, author: string, body: string) => {
-    if (!doc || !link) return
+    if (!doc || !link || !link.doc_id) return
     const comment = await store.addComment(link.doc_id, sectionId, author, body)
     if (comment) setDoc({ ...doc, comments: [...doc.comments, comment] })
   }
 
   const handleResolveComment = async (commentId: string) => {
-    if (!link) return
+    if (!link || !link.doc_id) return
     const updated = await store.resolveComment(link.doc_id, commentId)
     if (updated) setDoc(updated)
   }
@@ -78,7 +78,7 @@ export default function SharePage() {
             ? 'bg-blue-100 text-blue-600'
             : 'bg-purple-100 text-purple-600'
         }`}>
-          {link.permission === 'view' ? '읽기 전용' : link.permission === 'comment' ? '코멘트 가능' : '제안 가능'}
+          {link.permission === 'view' ? '읽기 전용' : '코멘트 가능'}
         </span>
         {link.permission !== 'view' && (
           <button
