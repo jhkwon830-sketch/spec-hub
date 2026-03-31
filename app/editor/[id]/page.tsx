@@ -309,21 +309,23 @@ const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowTreeDrawer(!showTreeDrawer)}
-            disabled={allDocs.length === 0}
+            disabled={!doc}
             className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${showTreeDrawer ? 'bg-gray-800 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
           >
             구조도 보기
           </button>
-          <ToolBtn active={rightPanel === 'comments'} onClick={() => setRightPanel(rightPanel === 'comments' ? null : 'comments')} title="코멘트" disabled={allDocs.length === 0}>
+          <ToolBtn active={rightPanel === 'comments'} onClick={() => setRightPanel(rightPanel === 'comments' ? null : 'comments')} title="코멘트" disabled={!doc}>
             💬{unresolvedCount > 0 && <span className="ml-1 bg-blue-500 text-white text-xs px-1 rounded-full">{unresolvedCount}</span>}
           </ToolBtn>
-          <ToolBtn active={rightPanel === 'versions'} onClick={() => setRightPanel(rightPanel === 'versions' ? null : 'versions')} title="버전 이력" disabled={allDocs.length === 0}>
+          <ToolBtn active={rightPanel === 'versions'} onClick={() => setRightPanel(rightPanel === 'versions' ? null : 'versions')} title="버전 이력" disabled={!doc}>
             🕐
           </ToolBtn>
-          <button onClick={handleExport} disabled={allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">↓ MD</button>
-          <button onClick={handleExportAll} disabled={allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">↓ 전체</button>
-          <button onClick={handlePublish} disabled={publishing || allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-900 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">{publishing ? '발행 중...' : '발행'}</button>
-          <button onClick={() => setShowWorkspaceShare(true)} disabled={allDocs.length === 0} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">공유</button>
+          <button onClick={handleExport} disabled={!doc} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">↓ MD</button>
+          <button onClick={handleExportAll} disabled={!doc} className="px-3 py-1 rounded text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">↓ 전체</button>
+          <button onClick={handlePublish} disabled={publishing || !doc} className="px-3 py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-900 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed">{publishing ? '발행 중...' : '발행'}</button>
+          {workspaceShareLinks.length > 0 && (
+            <button onClick={() => setShowWorkspaceShare(true)} className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">공유</button>
+          )}
         </div>
       </header>
 
